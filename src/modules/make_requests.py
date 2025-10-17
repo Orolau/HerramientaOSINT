@@ -1,6 +1,6 @@
 import requests
 
-def make_get_request(onSucces, onError, url):
+def make_GET_request(onSucces, onError, url):
     r = requests.get(url)
     if r.status_code == 200:
        onSucces(r.content)

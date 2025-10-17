@@ -1,6 +1,7 @@
 from pymongo import MongoClient
 from dotenv import load_dotenv
 import os
+from datetime import datetime
 
 def connect_database():
     # Cargar variables del entorno
@@ -12,4 +13,5 @@ def connect_database():
 
 
 def save_in_database(db, data, company_name):
-    db[company_name].insert_one(data)
+    date_str = datetime.now().strftime("%Y%m%d")
+    db[date_str].update_one({"company": company_name}, {"$set": data}, upsert = True)
