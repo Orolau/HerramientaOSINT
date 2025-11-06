@@ -1,51 +1,55 @@
 import whois
 import socket
-from modules.mongodb_management import save_in_database
 from datetime import datetime
+from modules.mongodb_management import update_domain_entry
 
 def get_ip(domain, db, company_name):
     try:
         ip = socket.gethostbyname(domain)
     except:
         ip = None
-    
-    save_in_database(db, {f"domains.{domain}.ip": ip}, company_name)
+    update_domain_entry(db, company_name, "domains", domain, {"ip": ip})
+
+
 
 def get_whois_info(domain, db, company_name):
+
     try:
         info = whois.whois(domain)
         data = dict(info)
-        print(data)
-        # Palabras o valores que queremos ignorar
-        valores_invalidos = ["", None, "Not Disclosed", "Redacted for Privacy", "REDACTED", "N/A", "None"]
 
+        valores_invalidos = ["", None, "Not Disclosed", "Redacted for Privacy", "REDACTED", "N/A", "None"]
         clean_data = {}
-        # Convertir listas o sets en strings legibles
+
         for k, v in data.items():
             if isinstance(v, (list, set)):
                 v = list(v)
                 if len(v) == 1:
                     v = v[0]
-
-            # Filtrar valores no deseados
-            if v and not any(str(v).strip().lower() == inval.lower() for inval in valores_invalidos):
+            if v and not any(str(v).strip().lower() == str(inval).lower() for inval in valores_invalidos):
                 clean_data[k] = v
 
-        save_in_database(db, {f"domains.{domain}.whois": clean_data}, company_name)
+        update_domain_entry(db, company_name, "domains", domain, {"whois": clean_data})
 
     except Exception as e:
-        save_in_database(db, {f"domains.{domain}.whois": "Error getting data"}, company_name)
+        update_domain_entry(db, company_name, "domains", domain, {"whois": {"error": str(e)}})
+
 
 
 def get_whois_all_domains(company_name, db):
     date_str = datetime.now().strftime("%Y%m%d")
     try:
-        domains = db[date_str].find_one({"company": company_name})["domains"]
+        record = db[date_str].find_one({"company": company_name})
+        if not record or "domains" not in record:
+            print(f"No se encontraron dominios para {company_name}")
+            return
+
+        domains = record["domains"]
 
         for domain in domains:
-            get_ip(domain, db, company_name)
-            get_whois_info(domain, db, company_name)
+            domain_name = domain.get("name")
+            get_ip(domain_name, db, company_name)
+            get_whois_info(domain_name, db, company_name)
         
-    except:
-        print("Error obteniendo la lista de dominios de la base de datos")
-
+    except Exception as e:
+        print(f"Error obteniendo la lista de dominios: {e}")

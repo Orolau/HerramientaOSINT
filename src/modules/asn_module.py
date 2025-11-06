@@ -6,7 +6,7 @@ from modules.make_requests import make_GET_request
 from modules.mongodb_management import save_in_database
 
 
-def parse_asns_and_routes(company_name, db,html_bytes: bytes) -> Dict[str, List[str]]:
+def parse_asns_and_routes(company_name, db,html_bytes: bytes):
     """
     Parsea el contenido HTML (en bytes) y extrae:
       - ASNs (ej: AS201976)

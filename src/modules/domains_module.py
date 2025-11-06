@@ -1,24 +1,72 @@
 import os
 from dotenv import load_dotenv
 import json
+import re
 from modules.mongodb_management import save_in_database, add_to_database_field
 from modules.make_requests import make_POST_request, make_GET_request
 from datetime import datetime
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 load_dotenv()
 API_KEY = os.getenv("API_KEY_DOMAINS")
 
 def is_domain_valid(domain):
-    url = f"http://{domain}"
-    try:
-        r = requests.get(url, timeout=3)
-        if r.status_code<400:
+    """
+    Comprueba si un dominio está activo y no pertenece a un placeholder
+    de registradores o páginas de aparcamiento.
+    """
+    placeholder_patterns = [
+        r"buy\s*this\s*domain",
+        r"this\s*domain\s*is\s*for\s*sale",
+        r"register\s*this\s*domain",
+        r"get\sthis\sdomain",
+        f"the domain {domain} is for sale",
+        r"busca\stu\sdominio",
+        r"domain\smay\sbe\savailable",
+        r"domain\s*parking",
+        r"go\s*daddy",
+        r"namecheap",
+        r"sedo",
+        r"acredited\sregistrar",
+        r"hostinger",
+        r"ovh",
+        r"plesk",
+        r"entorno\sdigital"
+        r"Heberjahiz",
+        r"página\s*de\s*inicio\s*por\s*defecto",
+        r"web\s*en\s*construcción",
+        r"coming\s*soon",
+        r"this\s*site\s*is\s*parked",
+        r"dns\s*error",
+        r"no\s*such\s*host",
+    ]
+
+    for protocol in ["https", "http"]:
+        url = f"{protocol}://{domain}"
+        try:
+            r = requests.get(url, timeout=4, headers={"User-Agent": "Mozilla/5.0"})
+            content = r.text.lower()
+
+            # Si no responde correctamente, descartamos
+            if r.status_code >= 400:
+                continue
+
+            # Si la respuesta es demasiado corta, probablemente sea falsa
+            if len(content) < 300:
+                continue
+
+            # Buscar patrones de placeholder
+            if any(re.search(p, content) for p in placeholder_patterns):
+                continue
+
+            # Si pasa todos los filtros, es un dominio válido
             return True
-        else:
-            return False
-    except requests.RequestException:
-        return False
+
+        except requests.RequestException:
+            continue
+
+    return False
     
 def saveDomainData(data, company_name, db):
     try:
@@ -26,25 +74,28 @@ def saveDomainData(data, company_name, db):
         domains_list = jsonData.get("domainsList", [])
 
         # Filtrar dominios válidos
-        valid_domains = [d for d in domains_list if is_domain_valid(d)]
+        valid_domains = check_domains_parallel(domains_list)
 
-        # Convertir la lista a diccionario: {"dominio": {}}
-        domains_dict = {domain: {} for domain in valid_domains}
+        if not valid_domains:
+            print(f"[-] No se encontraron dominios válidos para {company_name}")
+            return
+        # Crear lista de documentos
+        domain_docs = [{"name": d, "source": "whoisxmlapi"} for d in valid_domains]
 
         # Guardar o añadir al campo "domains"
-        add_to_database_field(db, company_name, "domains", domains_dict)
+        add_to_database_field(db, company_name, "domains", domain_docs)
 
-        print(f"{len(valid_domains)} dominios válidos guardados para {company_name}")
+        print(f"[+] {len(valid_domains)} dominios válidos guardados para {company_name}")
 
     except json.JSONDecodeError:
-        print("Error: la respuesta no es JSON válido.")
+        print("[!] Error: la respuesta no es JSON válido.")
     except KeyError:
-        print("Error: formato inesperado en los datos recibidos.")
+        print("[!] Error: formato inesperado en los datos recibidos.")
     except Exception as e:
-        print(f"Error al guardar datos: {e}")
+        print(f"[!] Error al guardar datos: {e}")
 
 def onError(error_code):
-    print(f"Error: {error_code}")
+    print(f"[!] Error: {error_code}")
 
 def get_domains_WHOISXMLAPI(company_name, db):
     """
@@ -62,7 +113,7 @@ def get_domains_WHOISXMLAPI(company_name, db):
     if record and "alternativeNames" in record:
         alt = record["alternativeNames"]
         if isinstance(alt, dict):
-            for key, val in alt.items():
+            for val in alt.items():
                 if isinstance(val, list):
                     names_to_search.extend(val)
         elif isinstance(alt, list):
@@ -75,15 +126,19 @@ def get_domains_WHOISXMLAPI(company_name, db):
 
     names_to_search = list({clean_name(n) for n in names_to_search if clean_name(n)})
 
-    print(f"Buscando dominios para: {', '.join(names_to_search)}")
+    print(f"[-] Buscando dominios para: {', '.join(names_to_search)}")
 
     headers = {"Content-Type": "application/json"}
 
     for name in names_to_search:
+        if name == company_name:
+            payload_name = f"*{name}.*"
+        else:
+            payload_name = f"{name}.*"
         payload = {
             "apiKey": API_KEY,
             "domains": {
-                "include": [f"{name}.*"]
+                "include": [payload_name]
             }
         }
 
@@ -95,6 +150,34 @@ def get_domains_WHOISXMLAPI(company_name, db):
             headers
         )
 
+def check_domains_parallel(domains, max_workers=20):
+    """
+    Comprueba en paralelo si los dominios existen.
+    Retorna SOLO la lista de dominios válidos.
+    """
+    if isinstance(domains, dict):
+        domain_list = list(domains.keys())
+    else:
+        domain_list = list(domains)
+
+    print(f"[-] Comprobando {len(domain_list)} dominios en paralelo...")
+
+    valid_domains = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_domain = {executor.submit(is_domain_valid, d): d for d in domain_list}
+
+        for future in as_completed(future_to_domain):
+            domain = future_to_domain[future]
+            try:
+                if future.result():  # Solo añadir los válidos
+                    valid_domains.append(domain)
+            except Exception:
+                pass
+
+    print(f"[+] {len(valid_domains)} dominios válidos / {len(domain_list)} totales.")
+    return valid_domains
+
 #------------------------------------------crt.sh--------------------------------------------------
 def get_crtsh_and_classify(company_name, db):
     """
@@ -103,10 +186,9 @@ def get_crtsh_and_classify(company_name, db):
     'domains' y 'subdomains'.
     """
 
-    base_query = f"%.{company_name}.%"
     url = f"https://crt.sh/json?q={company_name}"
 
-    print(f"Consultando crt.sh para {company_name}...")
+    print(f"[-] Consultando crt.sh para {company_name}...")
 
     def on_success(response_text):
         try:
@@ -121,11 +203,11 @@ def get_crtsh_and_classify(company_name, db):
                         all_names.add(n)
 
             if not all_names:
-                print(f"No se encontraron resultados en crt.sh para {company_name}")
+                print(f"[-] No se encontraron resultados en crt.sh para {company_name}")
                 return
 
-            domains_dict = {}
-            subdomains_dict = {}
+            domains = []
+            subdomains = []
 
             for name in all_names:
                 name = name.replace("https://", "").replace("http://", "").strip("/")
@@ -134,25 +216,28 @@ def get_crtsh_and_classify(company_name, db):
                 # --- Clasificación ---
                 # Si el nombre base está contenido y solo tiene 2 o 3 partes (e.g., mercadona.es o www.mercadona.es)
                 # y no tiene subniveles adicionales, lo clasificamos como dominio
-                if len(parts) < 3:
-                    domains_dict[name] = {}
-                elif len(parts) == 3 and parts[0] == "www":
-                    domains_dict['.'.join(parts[1:])] = {}
+                if len(parts) < 3 or (len(parts) == 3 and parts[0] == "www"):
+                    domains.append(name)
                 else:
-                    subdomains_dict[name] = {}
+                    subdomains.append(name)
 
             # --- Guardar en la base de datos ---
-            if domains_dict:
-                add_to_database_field(db, company_name, "domains", domains_dict)
-                print(f"{len(domains_dict)} dominios añadidos.")
-            if subdomains_dict:
-                add_to_database_field(db, company_name, "subdomains", subdomains_dict)
-                print(f"{len(subdomains_dict)} subdominios añadidos.")
+            # Validar dominios antes de guardar
+            valid_domains = check_domains_parallel(domains)
+            domain_docs = [{"name": d, "source": "crt.sh"} for d in valid_domains]
+            subdomain_docs = [{"name": s, "source": "crt.sh"} for s in subdomains]
+
+            if domain_docs:
+                add_to_database_field(db, company_name, "domains", domain_docs)
+                print(f"[+] {len(domain_docs)} dominios añadidos.")
+            if subdomain_docs:
+                add_to_database_field(db, company_name, "subdomains", subdomain_docs)
+                print(f"[+] {len(subdomain_docs)} subdominios añadidos.")
         except Exception as e:
-            print(f"Error procesando respuesta de crt.sh: {e}")
+            print(f"[!] Error procesando respuesta de crt.sh: {e}")
 
     def on_error(status_code):
-        print(f"Error {status_code} al consultar crt.sh para {company_name}")
+        print(f"[!] Error {status_code} al consultar crt.sh para {company_name}")
 
     make_GET_request(on_success, on_error, url)
 
