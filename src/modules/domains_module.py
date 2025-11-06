@@ -7,6 +7,7 @@ from modules.make_requests import make_POST_request, make_GET_request
 from datetime import datetime
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from colorama import Fore
 
 load_dotenv()
 API_KEY = os.getenv("API_KEY_DOMAINS")
@@ -80,7 +81,7 @@ def saveDomainData(data, company_name, db):
             print(f"[-] No se encontraron dominios válidos para {company_name}")
             return
         # Crear lista de documentos
-        domain_docs = [{"name": d, "source": "whoisxmlapi"} for d in valid_domains]
+        domain_docs = [{"name": d, "source": "whoisxmlapi", "included_subdomains_search": True} for d in valid_domains]
 
         # Guardar o añadir al campo "domains"
         add_to_database_field(db, company_name, "domains", domain_docs)
@@ -224,7 +225,7 @@ def get_crtsh_and_classify(company_name, db):
             # --- Guardar en la base de datos ---
             # Validar dominios antes de guardar
             valid_domains = check_domains_parallel(domains)
-            domain_docs = [{"name": d, "source": "crt.sh"} for d in valid_domains]
+            domain_docs = [{"name": d, "source": "crt.sh", "included_subdomains_search": True} for d in valid_domains]
             subdomain_docs = [{"name": s, "source": "crt.sh"} for s in subdomains]
 
             if domain_docs:
@@ -262,57 +263,145 @@ def subdomain_categorizer(subdomain):
             return category
     return "Desconocido"
 
-def saveSubDomainData(data, company_name, db):
-    jsonData = json.loads(data)
-    subdomains_list = {}
-    for i in jsonData["result"]["records"]: 
-        category = subdomain_categorizer(i["domain"])
-        subdomains_list[i["domain"]] = {"category": category}
-    
+def saveSubDomainData(data, company_name, db, parent_domain):
+    """
+    Guarda subdominios obtenidos desde WHOISXMLAPI en la base de datos.
+    Estructura: subdomains = [ {name, category, domain}, ... ]
+    """
     date_str = datetime.now().strftime("%Y%m%d")
     try:
-        subdomains_saved = db[date_str].find_one({"company": company_name})["subdomains"]
-        actualized_subdomains = dict(set(subdomains_list + subdomains_saved))
-        save_in_database(db, {"subdomains": actualized_subdomains}, company_name)
-    except:
-        save_in_database(db, {"subdomains": subdomains_list}, company_name)
+        jsonData = json.loads(data)
+        records = jsonData.get("result", {}).get("records", [])
+
+        if not records:
+            print(f"[!] No se encontraron subdominios para {parent_domain}.")
+            return
+
+        # Crear lista con la estructura deseada
+        new_subdomains = []
+        for record in records:
+            sub_name = record.get("domain")
+            if not sub_name:
+                continue
+            category = subdomain_categorizer(sub_name)
+            new_subdomains.append({
+                "name": sub_name,
+                "category": category,
+                "domain": parent_domain
+            })
+
+        collection = db[date_str]
+        company_doc = collection.find_one({"company": company_name})
+        existing_subdomains = company_doc.get("subdomains", []) if company_doc else []
+
+        # Evitar duplicados
+        existing_names = {sd["name"] for sd in existing_subdomains}
+        merged_subdomains = existing_subdomains + [sd for sd in new_subdomains if sd["name"] not in existing_names]
+
+        # Guardar actualizando solo el campo subdomains
+        collection.update_one(
+            {"company": company_name},
+            {"$set": {"subdomains": merged_subdomains}},
+            upsert=True
+        )
+
+        print(f"[+] {len(new_subdomains)} subdominios añadidos para {parent_domain}")
+
+    except json.JSONDecodeError:
+        print(f"[!] Respuesta no válida al guardar subdominios de {parent_domain}")
+    except Exception as e:
+        print(f"[!] Error al guardar subdominios de {parent_domain}: {e}")
+
 
 def get_subdomains(company_name, db):
+    """
+    Recorre los dominios con included_subdomains_search=True
+    y obtiene sus subdominios usando WHOISXMLAPI.
+    """
     date_str = datetime.now().strftime("%Y%m%d")
-    domains_list = db[date_str].find_one({"company": company_name})["domains"]
-    for i in domains_list:
-        url = f"https://subdomains.whoisxmlapi.com/api/v1?apiKey={API_KEY}&domainName={i}" 
-
-        make_GET_request(lambda data: saveSubDomainData(data, company_name, db), onError, url)
-
-def delete_not_included_domains(company_name, db):
-    date_str = datetime.now().strftime("%Y%m%d")
-    # Obtener los dominios almacenados (como lista)
     record = db[date_str].find_one({"company": company_name})
     if not record or "domains" not in record:
-        print(f"No se encontraron dominios para {company_name}.")
+        print(f"[!] No se encontraron dominios para {company_name}.")
         return
 
     domains_list = record["domains"]
 
-    print(f"\nDominios encontrados para {company_name}:")
+    # Filtrar dominios marcados como incluidos
+    domains_to_search = [d for d in domains_list if d.get("included_subdomains_search", True)]
+
+    print(f"\n[=] Buscando subdominios para {len(domains_to_search)} dominios...")
+
+    for domain_entry in domains_to_search:
+        domain_name = domain_entry.get("name")
+        if not domain_name:
+            continue
+
+        url = f"https://subdomains.whoisxmlapi.com/api/v1?apiKey={API_KEY}&domainName={domain_name}"
+
+        make_GET_request(
+            lambda data, dname=domain_name: saveSubDomainData(data, company_name, db, dname),
+            onError,
+            url
+        )
+
+
+def mark_excluded_domains_for_subdomain_search(company_name, db):
+    date_str = datetime.now().strftime("%Y%m%d")
+    # Obtener los dominios almacenados (como lista)
+    record = db[date_str].find_one({"company": company_name})
+    if not record or "domains" not in record:
+        print(f"[!] No se encontraron dominios para {company_name}.")
+        return
+
+    domains_list = record["domains"]
+
+    print(f"\n[=] Dominios encontrados para {company_name}:")
     for i, domain in enumerate(domains_list, start=1):
-        print(f"{i}. {domain}")
+        name = domain.get("name", "<sin nombre>")
+        include_flag = domain.get("included_subdomains_search", True)
+        status = "incluido" if include_flag else "excluido"
+        print(f"{i}. {name} ({status})")
 
-    print("\nIndica los números de los dominios que deseas incluir en la búsqueda de subdominios, separados por comas.")
-    include = input("Dominios a incluir: ").strip()
-    if include:
-        try:
-            indices = [int(i) - 1 for i in include.split(",") if i.strip().isdigit()]
-            filtered_domains = [d for i, d in enumerate(domains_list) if i in indices]
-        except ValueError:
-            print("Entrada no válida. No se eliminará ningún dominio.")
-            filtered_domains = domains_list
-    else:
-        filtered_domains = domains_list
-    
-    # Crear diccionario con dominios seleccionados
-    domains_dict = {domain: {} for domain in filtered_domains}
+    print("\n[=] Indica los números de los dominios que **NO** deseas incluir en la búsqueda de subdominios (separados por comas).")
+    print("    Ejemplo: 1,3,5-10,15")
+    exclude_input = input("[=] Dominios a excluir: ").strip()
+
+    def parse_indices(input_str, total):
+        """Convierte una cadena como '1,3,5-10' en una lista de índices [0,2,4,5,6,7,8,9]."""
+        indices = set()
+        parts = [p.strip() for p in input_str.split(",") if p.strip()]
+        for part in parts:
+            if "-" in part:
+                try:
+                    start, end = part.split("-")
+                    start, end = int(start), int(end)
+                    indices.update(range(start - 1, min(end, total)))  # convertir a base 0
+                except ValueError:
+                    print(f"[!] Rango inválido: {part}")
+            else:
+                if part.isdigit():
+                    idx = int(part) - 1
+                    if 0 <= idx < total:
+                        indices.add(idx)
+        return sorted(indices)
+
+    # Parsear la entrada del usuario
+    exclude_indices = parse_indices(exclude_input, len(domains_list)) if exclude_input else []
 
 
-    save_in_database(db, {"domains":domains_dict}, company_name)
+    # Actualizar los flags en la lista de dominios
+    updated_domains = []
+    for i, domain in enumerate(domains_list):
+        updated_domain = domain.copy()
+        updated_domain["included_subdomains_search"] = False if i in exclude_indices else True
+        updated_domains.append(updated_domain)
+
+    # Guardar los cambios en la base de datos
+    db[date_str].update_one(
+        {"company": company_name},
+        {"$set": {"domains": updated_domains}}
+    )
+
+    print(f"\n[+] Se han actualizado los dominios correctamente.")
+    for d in updated_domains:
+        print(f"  - {d.get('name')}: {'incluido' if d.get('included_subdomains_search', True) else 'excluido'}")
