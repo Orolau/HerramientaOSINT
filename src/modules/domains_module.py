@@ -53,10 +53,6 @@ def is_domain_valid(domain):
             if r.status_code >= 400:
                 continue
 
-            # Si la respuesta es demasiado corta, probablemente sea falsa
-            if len(content) < 300:
-                continue
-
             # Buscar patrones de placeholder
             if any(re.search(p, content) for p in placeholder_patterns):
                 continue
@@ -98,38 +94,83 @@ def saveDomainData(data, company_name, db):
 def onError(error_code):
     print(f"[!] Error: {error_code}")
 
-def get_domains_WHOISXMLAPI(company_name, db):
+def select_alternative_names(company_name, db):
     """
-    Busca dominios y subdominios asociados a una empresa,
-    incluyendo nombres alternativos. Hace una petición por cada nombre.
+    Permite al usuario seleccionar qué nombres alternativos utilizar
+    para la búsqueda de dominios en WHOISXMLAPI.
     """
-    urlWHOISXMLAPI = "https://domains-subdomains-discovery.whoisxmlapi.com/api/v1"
-
-    # Recuperar nombres alternativos desde la base de datos
     date_str = datetime.now().strftime("%Y%m%d")
     record = db[date_str].find_one({"company": company_name})
     
-    names_to_search = [company_name]
+    if not record or "alternativeNames" not in record:
+        print("[-] No se encontraron nombres alternativos.")
+        return [company_name]
 
-    if record and "alternativeNames" in record:
-        alt = record["alternativeNames"]
-        if isinstance(alt, dict):
-            for val in alt.items():
-                if isinstance(val, list):
-                    names_to_search.extend(val)
-        elif isinstance(alt, list):
-            names_to_search.extend(alt)
+    alt = record["alternativeNames"]
 
-    # Limpiar y normalizar nombres
+    # Aplanar todos los nombres alternativos en una lista simple
+    if isinstance(alt, dict):
+        alt_list = []
+        for k, v in alt.items():
+            if isinstance(v, list):
+                alt_list.extend(v)
+            elif isinstance(v, str):
+                alt_list.append(v)
+    elif isinstance(alt, list):
+        alt_list = alt
+    else:
+        alt_list = []
+
+    # Mostrar opciones al usuario
+    print(f"\n[+] Nombres alternativos encontrados para {company_name}:")
+    for i, name in enumerate(alt_list, start=1):
+        print(f"{i}. {name}")
+
+    print("\n[=] Indica los números de los nombres alternativos que deseas incluir, separados por comas o rangos (ej: 1,3,5-7).")
+    selected = input("[=] Nombres a incluir: ").strip()
+
+    # Si el usuario no selecciona nada → usar todos
+    if not selected:
+        print("[-] No se seleccionó ningún nombre. Se incluirán todos los alternativos.")
+        return [company_name] + alt_list
+
+    # Parsear los índices (soporta rangos)
+    indices = set()
+    for part in selected.split(","):
+        part = part.strip()
+        if "-" in part:
+            try:
+                start, end = map(int, part.split("-"))
+                indices.update(range(start, end + 1))
+            except ValueError:
+                continue
+        elif part.isdigit():
+            indices.add(int(part))
+
+    chosen = [alt_list[i - 1] for i in indices if 0 < i <= len(alt_list)]
+    chosen.insert(0, company_name)  # incluir el nombre principal siempre
+
+    print(f"[+] Se buscarán dominios para: {', '.join(chosen)}")
+    return chosen
+
+
+def get_domains_WHOISXMLAPI(company_name, db):
+    """
+    Busca dominios asociados a una empresa,
+    incluyendo solo los nombres alternativos seleccionados por el usuario.
+    """
+    urlWHOISXMLAPI = "https://domains-subdomains-discovery.whoisxmlapi.com/api/v1"
+    headers = {"Content-Type": "application/json"}
+
+    names_to_search = select_alternative_names(company_name, db)
+
     import re
     def clean_name(name):
         return re.sub(r"[^a-zA-Z0-9\-]", "", name).lower()
 
     names_to_search = list({clean_name(n) for n in names_to_search if clean_name(n)})
 
-    print(f"[-] Buscando dominios para: {', '.join(names_to_search)}")
-
-    headers = {"Content-Type": "application/json"}
+    print(f"\n[=] Iniciando búsqueda de dominios para: {', '.join(names_to_search)}")
 
     for name in names_to_search:
         if name == company_name:
@@ -161,7 +202,7 @@ def check_domains_parallel(domains, max_workers=20):
     else:
         domain_list = list(domains)
 
-    print(f"[-] Comprobando {len(domain_list)} dominios en paralelo...")
+    print(f"[=] Comprobando {len(domain_list)} dominios en paralelo...")
 
     valid_domains = []
 
@@ -189,7 +230,7 @@ def get_crtsh_and_classify(company_name, db):
 
     url = f"https://crt.sh/json?q={company_name}"
 
-    print(f"[-] Consultando crt.sh para {company_name}...")
+    print(f"[=] Consultando crt.sh para {company_name}...")
 
     def on_success(response_text):
         try:
@@ -247,21 +288,21 @@ def get_crtsh_and_classify(company_name, db):
 #-----------------------------------------Subdominios-----------------------------------------------------------------
 CATEGORIES = {
     "Administración": ["admin", "panel", "dashboard", "cpanel"],
-    "Desarrollo": ["dev", "test", "staging", "qa", "sandbox"],
-    "Correo": ["mail", "smtp", "imap", "mx"],
+    "Desarrollo": ["dev", "test", "staging", "qa", "sandbox","prueba"],
+    "Correo": ["mail","correo", "smtp", "imap", "mx", "spf"],
     "Autenticación": ["login", "auth", "signin", "sso"],
     "API / Servicio": ["api", "graphql", "backend", "ftp"],
     "CDN / Contenido estático": ["cdn", "static", "assets"],
-    "Aplicación / Producto": ["shop", "store", "app", "blog", "support"],
+    "Aplicación / Producto": ["shop", "tienda", "store", "app", "blog", "support", "news", "noticias"],
     "Infraestructura": ["ns", "vpn", "proxy", "monitor", "infra"],
-    "Regional": ["es", "us", "eu", "latam"]
+    "Regional": ["es", "us", "eu", "latam","pt", "fr", "nl"]
 }
 def subdomain_categorizer(subdomain):
     subdomain = subdomain.lower()
     for category, words in CATEGORIES.items():
         if any(word in subdomain for word in words):
             return category
-    return "Desconocido"
+    return "Sin categoría"
 
 def saveSubDomainData(data, company_name, db, parent_domain):
     """
@@ -274,7 +315,7 @@ def saveSubDomainData(data, company_name, db, parent_domain):
         records = jsonData.get("result", {}).get("records", [])
 
         if not records:
-            print(f"[!] No se encontraron subdominios para {parent_domain}.")
+            print(f"[-] No se encontraron subdominios para {parent_domain}.")
             return
 
         # Crear lista con la estructura deseada
@@ -321,7 +362,7 @@ def get_subdomains(company_name, db):
     date_str = datetime.now().strftime("%Y%m%d")
     record = db[date_str].find_one({"company": company_name})
     if not record or "domains" not in record:
-        print(f"[!] No se encontraron dominios para {company_name}.")
+        print(f"[-] No se encontraron dominios para {company_name}.")
         return
 
     domains_list = record["domains"]
