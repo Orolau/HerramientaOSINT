@@ -41,7 +41,7 @@ def get_whois_all_domains(company_name, db):
     try:
         record = db[date_str].find_one({"company": company_name})
         if not record or "domains" not in record:
-            print(f"No se encontraron dominios para {company_name}")
+            print(f"[!] Error: no se encontraron dominios para {company_name}")
             return
 
         domains = record["domains"]
@@ -50,6 +50,7 @@ def get_whois_all_domains(company_name, db):
             domain_name = domain.get("name")
             get_ip(domain_name, db, company_name)
             get_whois_info(domain_name, db, company_name)
+        print("[+] Completada la búsqueda de información de whois y direcciones IP para los dominios")
         
     except Exception as e:
-        print(f"Error obteniendo la lista de dominios: {e}")
+        print(f"[!] Error obteniendo la lista de dominios: {e}")

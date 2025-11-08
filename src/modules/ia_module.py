@@ -47,7 +47,7 @@ def get_related_company_names(company_name, db):
 
     
 def on_ai_error(status_code=None):
-    print(f"Error al realizar la petición a la API (status {status_code})")
+    print(f"[!] Error al realizar la petición a la API (status {status_code})")
 
 
 def parse_ai_data(response, company_name, db):
@@ -65,12 +65,12 @@ def parse_ai_data(response, company_name, db):
             parsed = json.loads(text)
         except json.JSONDecodeError:
             # Si no es JSON válido, lo guardamos como texto
-            print("El modelo no devolvió JSON válido. Se guardará como texto plano.")
+            print("[!] Error: el modelo no devolvió JSON válido. Se guardará como texto plano.")
             parsed = {"raw_text": text}
 
         # Guardar en la base de datos
         save_in_database(db, {"alternativeNames": parsed}, company_name)
-        print("Información de nombres alternativos guardada correctamente.")
+        print("[+] Información de nombres alternativos guardada correctamente.")
 
     except (KeyError, IndexError, json.JSONDecodeError) as e:
-        print("Error al procesar la respuesta del modelo:", e)
+        print("[!] Error al procesar la respuesta del modelo:", e)

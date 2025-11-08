@@ -34,10 +34,12 @@ def parse_asns_and_routes(company_name, db,html_bytes: bytes):
     routes = dedup(routes)
 
     save_in_database(db, {"asn": asns, "routes": routes}, company_name)
+    print("[+] Completada la obtención de los ASN y las rutas")
 
 
 def onError_getting_asn(db, company_name):
     save_in_database(db, {"asn": [], "routes": []}, company_name)
+    print("[!] Error en la obtención de los ASN y las rutas")
 
 def get_asn_info(company_name,db):
     url = f"https://bgp.he.net/search?search%5Bsearch%5D={company_name}&commit=Search"
