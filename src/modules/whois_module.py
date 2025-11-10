@@ -18,7 +18,7 @@ def get_whois_info(domain, db, company_name):
         info = whois.whois(domain)
         data = dict(info)
 
-        valores_invalidos = ["", None, "Not Disclosed", "Redacted for Privacy", "REDACTED", "N/A", "None"]
+        valores_invalidos = ["", None, "Not Disclosed", " not published", "Redacted for Privacy", "REDACTED", "N/A", "None"]
         clean_data = {}
 
         for k, v in data.items():
