@@ -188,47 +188,76 @@ def generar_informe_pdf(company_name, db, date_str=None):
 
     # ======= WHOIS =======
     story.append(Paragraph("Información WHOIS", styles["Heading2"]))
+    story.append(Spacer(1, 6))
+
+    intro_text = (
+        "A continuación se detalla la información obtenida de los registros WHOIS para los dominios "
+        "identificados. Estos datos permiten conocer la fecha de creación, actualización, expiración, "
+        "registrador y otros atributos técnicos relevantes."
+    )
+    story.append(Paragraph(intro_text, styles["Normal"]))
+    story.append(Spacer(1, 12))
 
     for d in domains:
+        domain_name = d.get("name", "")
         whois = d.get("whois", {})
-        if whois:
-            story.append(Paragraph(f"<b>{d.get('name', '')}</b>", styles["Heading3"]))
-            whois_data = []
-            for k, v in whois.items():
-                if v is None:
-                    continue
-                # Convertir listas a cadena
-                if isinstance(v, list):
-                    v_str_list = []
-                    for item in v:
-                        if isinstance(item, datetime):
-                            v_str_list.append(item.strftime("%d/%m/%Y %H:%M"))
-                        else:
-                            v_str_list.append(str(item))
-                    v_str = ', '.join(v_str_list)
-                # Convertir datetime a string
-                elif isinstance(v, datetime):
-                    v_str = v.strftime("%d/%m/%Y %H:%M")
-                else:
-                    v_str = str(v)
-                whois_data.append([k, v_str])
-            
-            if whois_data:  # Solo crear tabla si hay datos
-                table = Table(whois_data, hAlign='LEFT', colWidths=[120, 300])
-                table.setStyle(TableStyle([
-                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4F81BD")),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                    ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#D9E1F2")),
-                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('VALIGN', (0,0), (-1,-1), 'TOP')
-                ]))
-                story.append(table)
-                story.append(Spacer(1, 10))
-            else:
-                story.append(Paragraph("No hay información WHOIS disponible.", styles["Normal"]))
-                story.append(Spacer(1, 10))
 
+        story.append(Paragraph(f"<b>{domain_name}</b>", styles["Heading3"]))
+        story.append(Spacer(1, 4))
+
+        if not whois:
+            story.append(Paragraph("No hay información WHOIS disponible para este dominio.", styles["Italic"]))
+            story.append(Spacer(1, 10))
+            continue
+
+        whois_data = []
+
+        for k, v in whois.items():
+
+            if v is None:
+                continue
+
+            # Convertir valores dependiendo del tipo
+            if isinstance(v, list):
+                items = []
+                for item in v:
+                    if isinstance(item, datetime):
+                        items.append(item.strftime("%d/%m/%Y %H:%M"))
+                    else:
+                        items.append(str(item))
+                v_str = ", ".join(items)
+
+            elif isinstance(v, datetime):
+                v_str = v.strftime("%d/%m/%Y %H:%M")
+
+            else:
+                v_str = str(v)
+
+            whois_data.append([
+                Paragraph(str(k), styles["Normal"]),
+                Paragraph(v_str, styles["Normal"])
+            ])
+
+        if whois_data:
+            table = Table(
+                whois_data,
+                hAlign='LEFT',
+                colWidths=[120, 330]  # más espacio para valores largos
+            )
+
+            table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F3F6FB")),
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('LEFTPADDING', (0,0), (-1,-1), 6),
+                ('RIGHTPADDING', (0,0), (-1,-1), 6),
+            ]))
+
+            story.append(table)
+            story.append(Spacer(1, 15))
+        else:
+            story.append(Paragraph("No hay información WHOIS válida que mostrar.", styles["Italic"]))
+            story.append(Spacer(1, 10))
 
 
     # ======= ASN =======
@@ -269,32 +298,115 @@ def generar_informe_pdf(company_name, db, date_str=None):
 
     # ======= Sedes Físicas =======
     story.append(Paragraph("Sedes Físicas", styles["Heading2"]))
+    story.append(Spacer(1, 6))
+
+    # Introducción
+    intro_loc = (
+        "A continuación se muestran las sedes físicas asociadas a la compañía según los resultados "
+        "obtenidos mediante búsquedas OSINT. Se incluye la dirección, tipo de instalación y otros "
+        "atributos relevantes cuando están disponibles."
+    )
+    story.append(Paragraph(intro_loc, styles["Normal"]))
+    story.append(Spacer(1, 10))
+
     locations = record.get("locations", [])
+
     if locations:
+
+        # Encabezados
         loc_data = [["Dirección", "Tipo", "Rating", "Teléfono"]]
+
         for loc in locations:
             loc_data.append([
-                loc.get("address", ""),
-                loc.get("type", ""),
-                str(loc.get("rating", "")),
-                loc.get("phone", "")
+                Paragraph(loc.get("address", "") or "-", styles["Normal"]),
+                Paragraph(loc.get("type", "") or "-", styles["Normal"]),
+                Paragraph(str(loc.get("rating", "")) or "-", styles["Normal"]),
+                Paragraph(loc.get("phone", "") or "-", styles["Normal"])
             ])
-        table = Table(loc_data, hAlign='LEFT', colWidths=[80, 200, 80, 50, 80])
+
+        # Ajuste automático: colWidths=None para que se adapten, pero con máximo razonable si quieres
+        table = Table(
+            loc_data,
+            hAlign='LEFT',
+            colWidths=[200, 120, 60, 120]  # columnas proporcionadas y con salto de línea
+        )
+
         table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4F81BD")),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#D9E1F2")),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('VALIGN', (0,0), (-1,-1), 'TOP')
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#D9E1F2")),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0,0), (-1,-1), 6),
+            ('RIGHTPADDING', (0,0), (-1,-1), 6),
         ]))
+
         story.append(table)
         story.append(Spacer(1, 15))
-    img_path = generar_mapa_sedes(locations)
-    if img_path:
-        story.append(Paragraph("Mapa de Sedes", styles["Heading2"]))
-        story.append(Image(img_path, width=500, height=300))
+
+    else:
+        # No hay sedes → Mensaje claro
+        story.append(Paragraph(
+            "No se han identificado sedes físicas asociadas a la empresa mediante las fuentes consultadas.",
+            styles["Italic"]
+        ))
         story.append(Spacer(1, 15))
+
+    # ======= Mapa =======
+    if locations:
+        img_path = generar_mapa_sedes(locations)
+        if img_path:
+            story.append(Paragraph("Mapa de Sedes", styles["Heading2"]))
+            story.append(Image(img_path, width=500, height=300))
+            story.append(Spacer(1, 15))
+
+
+    #=================Empleados===================
+    employees = record.get("employees", [])
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("<b>Empleados Identificados</b>", styles["Heading2"]))
+    story.append(Spacer(1, 6))
+
+    if not employees:
+        story.append(Paragraph("No se han encontrado empleados asociados.", styles["Normal"]))
+        story.append(Spacer(1, 12))
+        return
+
+    # Explicación introductoria
+    intro = (
+        "Esta sección recoge los empleados encontrados mediante búsquedas OSINT en fuentes públicas. "
+        "Los resultados incluyen el nombre del perfil, el enlace público encontrado y un extracto del contenido asociado."
+    )
+    story.append(Paragraph(intro, styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    # Tabla
+    data = [["Nombre", "Perfil", "Extracto"]]
+
+    for emp in employees:
+        name = emp.get("name", "")
+        link = emp.get("profile_link", "")
+        additional_data = emp.get("additional_data", "")
+
+        data.append([
+            Paragraph(name, styles["Normal"]),
+            Paragraph(f'<a href="{link}">{link}</a>', styles["Normal"]),
+            Paragraph(additional_data or "-", styles["Normal"])
+        ])
+
+    table = Table(data, colWidths=[150, 200, 200])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+    ]))
+
+    story.append(table)
+    story.append(Spacer(1, 24))
 
 
     # Comprobar dominios que expiran en menos de un año
