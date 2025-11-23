@@ -13,7 +13,7 @@ def dominios_por_expirar(domains):
     """
     expiran_proximo_anio = []
     hoy = datetime.now()
-    limite = hoy + timedelta(days=365)
+    limite = hoy + timedelta(days=182)
 
     for d in domains:
         whois = d.get("whois", {})
@@ -116,6 +116,8 @@ def generar_informe_pdf(company_name, db, date_str=None):
     num_subdomains = len(record.get("subdomains", []))
     num_asn = len(record.get("asn", []))  
     num_routes = len(record.get("routes", []))
+    num_locations = len(record.get("locations", []))
+    num_employees = len(record.get("employees", []))
 
 
     resumen_data = [
@@ -124,6 +126,8 @@ def generar_informe_pdf(company_name, db, date_str=None):
         ["Subdominios Descubiertos", num_subdomains],
         ["ASN", num_asn],
         ["Rutas", num_routes],
+        ["Sedes físicas", num_locations],
+        ["Empleados", num_employees]
     ]
     resumen_table = Table(resumen_data, hAlign='LEFT')
     resumen_table.setStyle(TableStyle([
@@ -139,52 +143,137 @@ def generar_informe_pdf(company_name, db, date_str=None):
     story.append(Spacer(1, 15))
 
     # ======= Nombres Alternativos =======
-    alt_names = record.get("alternativeNames", {})
     story.append(Paragraph("Nombres Alternativos", styles["Heading2"]))
-    for category, names in alt_names.items():
-        if names:
-            story.append(Paragraph(f"<b>{category.capitalize()}</b>: {', '.join(names)}", styles["Normal"]))
-            story.append(Spacer(1, 5))
+    story.append(Spacer(1, 6))
+
+    intro_alt = (
+        "En esta sección se muestran los diferentes nombres alternativos, alias o variaciones "
+        "con los que la empresa puede aparecer registrada en distintas fuentes OSINT. "
+        "Esto incluye denominaciones comerciales, siglas, abreviaturas, marcas propias o variaciones regionales."
+    )
+    story.append(Paragraph(intro_alt, styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    alt_names = record.get("alternativeNames", {})
+
+    # Verificar si existen nombres alternativos
+    if not alt_names or all(not names for names in alt_names.values()):
+        story.append(Paragraph("No se han identificado nombres alternativos para esta empresa.", styles["Italic"]))
+        story.append(Spacer(1, 10))
+    else:
+        for category, names in alt_names.items():
+            if names:
+                category_title = category.capitalize()
+                names_str = ", ".join(names)
+                story.append(Paragraph(f"<b>{category_title}</b>: {names_str}", styles["Normal"]))
+                story.append(Spacer(1, 5))
+
 
     # ======= Dominios =======
     story.append(Paragraph("Dominios Identificados", styles["Heading2"]))
+    story.append(Spacer(1, 6))
+
+    intro_domains = (
+        "En esta sección se presentan los dominios asociados a la empresa. "
+        "Estos datos se obtienen a partir de consultas OSINT y diversas fuentes externas, "
+        "permitiendo identificar infraestructura pública relacionada con la organización."
+    )
+    story.append(Paragraph(intro_domains, styles["Normal"]))
+    story.append(Spacer(1, 12))
+
     domains = record.get("domains", [])
+
     if domains:
         data = [["Dominio", "Dirección IP", "Fuente"]]
+
         for d in domains:
             data.append([
                 d.get("name", ""),
                 d.get("ip", ""),
                 d.get("source", "")
             ])
-        table = Table(data, hAlign='LEFT')
+
+        table = Table(
+            data,
+            hAlign='LEFT',
+            colWidths=[180, 150, 100]
+        )
+
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#D9E1F2")),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold')
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#D9E1F2")),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ]))
+
+        # Ajustes de estilo para permitir texto multilínea en celdas
+        for row in range(1, len(data)):
+            table.setStyle([
+                ('ROWHEIGHT', (0, row), (-1, row), None),  # Altura automática
+            ])
+
         story.append(table)
+    else:
+        story.append(Paragraph("No se han identificado dominios asociados a la empresa.", styles["Italic"]))
+
     story.append(Spacer(1, 15))
+
 
     # ======= Subdominios =======
     story.append(Paragraph("Subdominios Descubiertos", styles["Heading2"]))
+    story.append(Spacer(1, 6))
+
+    intro_subdomains = (
+        "A continuación se muestran los subdominios asociados a la infraestructura pública de la empresa. "
+        "Estos datos provienen de herramientas OSINT que permiten identificar activos expuestos y posibles "
+        "superficies de ataque derivadas de servicios publicados."
+    )
+    story.append(Paragraph(intro_subdomains, styles["Normal"]))
+    story.append(Spacer(1, 12))
+
     subs = record.get("subdomains", [])
+
     if subs:
-        data = [["Subdominio", "Categoría", "Dominio Padre"]]
+        data = [[
+            Paragraph("<b>Subdominio</b>",styles["Normal"]),
+            Paragraph("<b>Categoría</b>", styles["Normal"]),
+            Paragraph("<b>Dominio Padre</b>", styles["Normal"])
+        ]]
+
         for s in subs:
-            data.append([s.get("name", ""), s.get("category", ""), s.get("domain", "")])
-        table = Table(data, hAlign='LEFT')
+            data.append([
+                Paragraph(s.get("name", ""), styles["Normal"]),
+                Paragraph(s.get("category", ""), styles["Normal"]),
+                Paragraph(s.get("domain", ""), styles["Normal"])
+            ])
+
+        table = Table(
+            data,
+            hAlign='LEFT',
+            colWidths=[180, 120, 150]  # Ajustables
+        )
+
         table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4F81BD")),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#D9E1F2")),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold')
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#D9E1F2")),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ]))
+
         story.append(table)
+
+    else:
+        story.append(Paragraph(
+            "No se han identificado subdominios asociados a la empresa mediante las fuentes consultadas.",
+            styles["Italic"]
+        ))
+
     story.append(Spacer(1, 15))
+
 
     # ======= WHOIS =======
     story.append(Paragraph("Información WHOIS", styles["Heading2"]))
@@ -246,11 +335,12 @@ def generar_informe_pdf(company_name, db, date_str=None):
             )
 
             table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4F81BD")),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F3F6FB")),
-                ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                ('LEFTPADDING', (0,0), (-1,-1), 6),
-                ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#D9E1F2")),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('VALIGN', (0,0), (-1,-1), 'TOP')
             ]))
 
             story.append(table)
@@ -262,45 +352,75 @@ def generar_informe_pdf(company_name, db, date_str=None):
 
     # ======= ASN =======
     story.append(Paragraph("ASN Asociados", styles["Heading2"]))
-    asns = record.get("asn", [])  # ahora es lista de strings
+
+    # Introducción
+    story.append(Paragraph(
+        "Los Sistemas Autónomos (ASN) identifican bloques de infraestructura gestionados por una organización. "
+        "La detección de ASN asociados permite conocer la presencia de red de la empresa y su exposición en Internet.",
+        styles["Normal"]
+    ))
+    story.append(Spacer(1, 10))
+
+    asns = record.get("asn", [])  # Lista de strings
     if asns:
         asn_data = [["ASN"]]
         for a in asns:
-            asn_data.append([a])  # cada ASN en una fila
-        table = Table(asn_data, hAlign='LEFT')
+            # Usamos Paragraph para permitir salto de línea
+            asn_data.append([Paragraph(a, styles["Normal"])])
+
+        table = Table(asn_data, hAlign='LEFT', colWidths=[450])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4F81BD")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#D9E1F2")),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold')
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP')
         ]))
         story.append(table)
-        story.append(Spacer(1, 15))
+    else:
+        story.append(Paragraph("No se han identificado ASN asociados a la empresa.", styles["Italic"]))
+
+    story.append(Spacer(1, 20))
+
 
     # ======= Rutas =======
-    story.append(Paragraph("Rutas de Red", styles["Heading2"]))
-    routes = record.get("routes", [])  # lista de strings
+    story.append(Paragraph("Rangos de Red (IP Ranges)", styles["Heading2"]))
+
+    # Introducción
+    story.append(Paragraph(
+        "Los rangos IP anunciados por los ASN representan los bloques de direcciones que la empresa expone "
+        "en Internet. Esta información permite delimitar su perímetro técnico y detectar posibles activos accesibles.",
+        styles["Normal"]
+    ))
+    story.append(Spacer(1, 10))
+
+    routes = record.get("routes", [])  # Lista de strings
     if routes:
         routes_data = [["Red"]]
         for r in routes:
-            routes_data.append([r])  # cada ruta en una fila
-        table = Table(routes_data, hAlign='LEFT')
+            routes_data.append([Paragraph(r, styles["Normal"])])
+
+        table = Table(routes_data, hAlign='LEFT', colWidths=[450])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4F81BD")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#D9E1F2")),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold')
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP')
         ]))
         story.append(table)
-        story.append(Spacer(1, 15))
+    else:
+        story.append(Paragraph("No se han encontrado rangos IP asociados a la empresa.", styles["Italic"]))
+
+    story.append(Spacer(1, 20))
+
 
     # ======= Sedes Físicas =======
     story.append(Paragraph("Sedes Físicas", styles["Heading2"]))
     story.append(Spacer(1, 6))
 
-    # Introducción
     intro_loc = (
         "A continuación se muestran las sedes físicas asociadas a la compañía según los resultados "
         "obtenidos mediante búsquedas OSINT. Se incluye la dirección, tipo de instalación y otros "
@@ -398,11 +518,12 @@ def generar_informe_pdf(company_name, db, date_str=None):
 
     table = Table(data, colWidths=[150, 200, 200])
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4F81BD")),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#D9E1F2")),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP')
     ]))
 
     story.append(table)
