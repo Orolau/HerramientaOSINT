@@ -54,6 +54,7 @@ def shodan_get_assets(company_name, db):
     query = f'org:"{company_name}"'
 
     try:
+        print("[=] Buscando activos expuestos en internet en Shodan...")
         results = api.search(query)
     except Exception as e:
         print(f"[!] Error con Shodan: {e}")

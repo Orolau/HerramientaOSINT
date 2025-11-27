@@ -92,7 +92,7 @@ CATEGORY_COLORS = {
     "administracion": colors.HexColor("#FCE4D6"), 
     "infraestructura": colors.HexColor("#E2EFDA"),
     "correo": colors.HexColor("#FFF2CC"),         
-    "iot": colors.HexColor("#F2DCDB"),            
+    "iot": colors.HexColor("#EADBF2"),            
     "otros": colors.HexColor("#E7E6E6")     
 }
 
@@ -364,9 +364,9 @@ def generar_informe_pdf(company_name, db, date_str=None):
     story.append(Paragraph("Activos Expuestos en Internet (Shodan)", styles["Heading2"]))
 
     story.append(Paragraph(
-        "Esta sección recoge los sistemas y servicios expuestos públicamente asociados a la organización, "
-        "identificados mediante consultas a Shodan. Se muestran sus principales características, "
-        "la tecnología detectada, la categoría asignada y si poseen vulnerabilidades conocidas.",
+        "Cada activo descubierto mediante Shodan se muestra en una tabla individual. "
+        "Para cada uno se indican todos los campos devueltos por la API, incluyendo IP, puerto, "
+        "proveedor, sistema detectado, hostnames, ubicación, banners, CPEs y posibles vulnerabilidades.",
         styles["Normal"]
     ))
     story.append(Spacer(1, 10))
@@ -379,57 +379,58 @@ def generar_informe_pdf(company_name, db, date_str=None):
             styles["Italic"]
         ))
         story.append(Spacer(1, 15))
+
     else:
-        # encabezados
-        data = [["IP", "Puerto", "Hostnames", "Tecnología", "Categoría", "Vulnerabilidades"]]
+        for asset in assets:
 
-        for a in assets:
-            vulns = ", ".join(a.get("vulns", [])) if a.get("vulns") else "Ninguna"
+            # ===== COLOR SEGÚN CATEGORÍA =====
+            cat = asset.get("category", "otros")
+            bg_color = CATEGORY_COLORS.get(cat, CATEGORY_COLORS["otros"])
 
-            # convertir texto largo
-            hostnames = "\n".join(a.get("hostnames", [])) if a.get("hostnames") else "-"
+            rows = []
 
-            product = a.get("product") or ""
-            version = a.get("version") or ""
+            for key, value in asset.items():
 
-            tech = f"{product} {version}".strip()
+                # Ignorar claves internas si no quieres mostrarlas:
+                if key in ["source"]:
+                    continue
 
-            tech = tech if tech else "-"
+                # Convertir listas → texto multilínea
+                if isinstance(value, list):
+                    value = "\n".join(str(v) for v in value) if value else "-"
 
-            data.append([
-                Paragraph(a.get("ip", ""), styles["Normal"]),
-                Paragraph(str(a.get("port", "")), styles["Normal"]),
-                Paragraph(hostnames, styles["Normal"]),
-                Paragraph(tech, styles["Normal"]),
-                Paragraph(a.get("category", "Desconocido"), styles["Normal"]),
-                Paragraph(vulns, styles["Normal"])
+                # Convertir diccionarios → texto multilínea "clave: valor"
+                elif isinstance(value, dict):
+                    if not value:
+                        value = "-"
+                    else:
+                        formatted = []
+                        for k, v in value.items():
+                            formatted.append(f"{k}: {v}")
+                        value = "\n".join(formatted)
+
+                # Convertir None → "-"
+                elif value is None:
+                    value = "-"
+
+                rows.append([
+                    Paragraph(f"<b>{key}</b>", styles["Normal"]),
+                    Paragraph(str(value), styles["Normal"])
+                ])
+
+            # ===== CREAR TABLA POR ACTIVO =====
+            table = Table(rows, hAlign='LEFT', colWidths=[120, 350])
+
+            ts = TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('BACKGROUND', (0, 0), (-1, -1), bg_color),
             ])
 
-        table = Table(data, hAlign='LEFT', colWidths=[80, 40, 120, 120, 90, 120])
+            table.setStyle(ts)
+            story.append(table)
 
-        # ********** Estilos básicos **********
-        ts = TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ])
-
-        # ********** Colorear filas según categoría **********
-        for row_idx, a in enumerate(assets, start=1):  # start=1 para saltar encabezado
-            cat = a.get("category", "otros")
-            bg_color = CATEGORY_COLORS.get(cat, CATEGORY_COLORS["otros"])
-            ts.add('BACKGROUND', (0, row_idx), (-1, row_idx), bg_color)
-
-            # ********** Resaltar vulnerabilidades **********
-            if a.get("vulns"):
-                ts.add('TEXTCOLOR', (5, row_idx), (5, row_idx), colors.red)
-                ts.add('FONTNAME', (5, row_idx), (5, row_idx), 'Helvetica-Bold')
-
-        table.setStyle(ts)
-        story.append(table)
-        story.append(Spacer(1, 15))
+            story.append(Spacer(1, 15))
 
 
     # ======= ASN =======
@@ -516,13 +517,12 @@ def generar_informe_pdf(company_name, db, date_str=None):
     if locations:
 
         # Encabezados
-        loc_data = [["Dirección", "Tipo", "Rating", "Teléfono"]]
+        loc_data = [["Dirección", "Tipo", "Teléfono"]]
 
         for loc in locations:
             loc_data.append([
                 Paragraph(loc.get("address", "") or "-", styles["Normal"]),
                 Paragraph(loc.get("type", "") or "-", styles["Normal"]),
-                Paragraph(str(loc.get("rating", "")) or "-", styles["Normal"]),
                 Paragraph(loc.get("phone", "") or "-", styles["Normal"])
             ])
 
@@ -530,7 +530,7 @@ def generar_informe_pdf(company_name, db, date_str=None):
         table = Table(
             loc_data,
             hAlign='LEFT',
-            colWidths=[200, 120, 60, 120]  # columnas proporcionadas y con salto de línea
+            colWidths=[200, 120, 120]  # columnas proporcionadas y con salto de línea
         )
 
         table.setStyle(TableStyle([

@@ -32,7 +32,7 @@ def get_company_locations_serpapi(company_name, db):
     results_list = []
 
     for query in search_variations:
-        print(f"Buscando: {query}")
+        print(f"[=] Buscando: {query}")
         params = {
             "engine": "google_maps",
             "q": query,
@@ -51,7 +51,6 @@ def get_company_locations_serpapi(company_name, db):
                     "name": r.get("title"),
                     "address": r.get("address"),
                     "type": r.get("type"),
-                    "rating": r.get("rating"),
                     "gps_coordinates": r.get("gps_coordinates", {}),
                     "phone": r.get("phone"),
                 }
