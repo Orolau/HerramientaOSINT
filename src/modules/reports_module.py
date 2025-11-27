@@ -86,6 +86,15 @@ def generar_mapa_sedes(locations, mapa_path="sedes_map.html", img_path="sedes_ma
     except Exception as e:
         print(f"No se pudo generar la imagen del mapa: {e}")
         return None
+    
+CATEGORY_COLORS = {
+    "web": colors.HexColor("#D9E1F2"),            
+    "administracion": colors.HexColor("#FCE4D6"), 
+    "infraestructura": colors.HexColor("#E2EFDA"),
+    "correo": colors.HexColor("#FFF2CC"),         
+    "iot": colors.HexColor("#F2DCDB"),            
+    "otros": colors.HexColor("#E7E6E6")     
+}
 
 
 def generar_informe_pdf(company_name, db, date_str=None):
@@ -116,6 +125,7 @@ def generar_informe_pdf(company_name, db, date_str=None):
     num_subdomains = len(record.get("subdomains", []))
     num_asn = len(record.get("asn", []))  
     num_routes = len(record.get("routes", []))
+    num_assets = len(record.get("shodan_assets", []))
     num_locations = len(record.get("locations", []))
     num_employees = len(record.get("employees", []))
 
@@ -126,6 +136,7 @@ def generar_informe_pdf(company_name, db, date_str=None):
         ["Subdominios Descubiertos", num_subdomains],
         ["ASN", num_asn],
         ["Rutas", num_routes],
+        ["Activos", num_assets],
         ["Sedes físicas", num_locations],
         ["Empleados", num_employees]
     ]
@@ -349,11 +360,82 @@ def generar_informe_pdf(company_name, db, date_str=None):
             story.append(Paragraph("No hay información WHOIS válida que mostrar.", styles["Italic"]))
             story.append(Spacer(1, 10))
 
+    # ======= Activos Expuestos en Internet (Shodan) =======
+    story.append(Paragraph("Activos Expuestos en Internet (Shodan)", styles["Heading2"]))
+
+    story.append(Paragraph(
+        "Esta sección recoge los sistemas y servicios expuestos públicamente asociados a la organización, "
+        "identificados mediante consultas a Shodan. Se muestran sus principales características, "
+        "la tecnología detectada, la categoría asignada y si poseen vulnerabilidades conocidas.",
+        styles["Normal"]
+    ))
+    story.append(Spacer(1, 10))
+
+    assets = record.get("shodan_assets", [])
+
+    if not assets:
+        story.append(Paragraph(
+            "No se han identificado activos expuestos asociados a la organización.",
+            styles["Italic"]
+        ))
+        story.append(Spacer(1, 15))
+    else:
+        # encabezados
+        data = [["IP", "Puerto", "Hostnames", "Tecnología", "Categoría", "Vulnerabilidades"]]
+
+        for a in assets:
+            vulns = ", ".join(a.get("vulns", [])) if a.get("vulns") else "Ninguna"
+
+            # convertir texto largo
+            hostnames = "\n".join(a.get("hostnames", [])) if a.get("hostnames") else "-"
+
+            product = a.get("product") or ""
+            version = a.get("version") or ""
+
+            tech = f"{product} {version}".strip()
+
+            tech = tech if tech else "-"
+
+            data.append([
+                Paragraph(a.get("ip", ""), styles["Normal"]),
+                Paragraph(str(a.get("port", "")), styles["Normal"]),
+                Paragraph(hostnames, styles["Normal"]),
+                Paragraph(tech, styles["Normal"]),
+                Paragraph(a.get("category", "Desconocido"), styles["Normal"]),
+                Paragraph(vulns, styles["Normal"])
+            ])
+
+        table = Table(data, hAlign='LEFT', colWidths=[80, 40, 120, 120, 90, 120])
+
+        # ********** Estilos básicos **********
+        ts = TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ])
+
+        # ********** Colorear filas según categoría **********
+        for row_idx, a in enumerate(assets, start=1):  # start=1 para saltar encabezado
+            cat = a.get("category", "otros")
+            bg_color = CATEGORY_COLORS.get(cat, CATEGORY_COLORS["otros"])
+            ts.add('BACKGROUND', (0, row_idx), (-1, row_idx), bg_color)
+
+            # ********** Resaltar vulnerabilidades **********
+            if a.get("vulns"):
+                ts.add('TEXTCOLOR', (5, row_idx), (5, row_idx), colors.red)
+                ts.add('FONTNAME', (5, row_idx), (5, row_idx), 'Helvetica-Bold')
+
+        table.setStyle(ts)
+        story.append(table)
+        story.append(Spacer(1, 15))
+
 
     # ======= ASN =======
     story.append(Paragraph("ASN Asociados", styles["Heading2"]))
 
-    # Introducción
+    
     story.append(Paragraph(
         "Los Sistemas Autónomos (ASN) identifican bloques de infraestructura gestionados por una organización. "
         "La detección de ASN asociados permite conocer la presencia de red de la empresa y su exposición en Internet.",
@@ -385,7 +467,7 @@ def generar_informe_pdf(company_name, db, date_str=None):
 
 
     # ======= Rutas =======
-    story.append(Paragraph("Rangos de Red (IP Ranges)", styles["Heading2"]))
+    story.append(Paragraph("Rangos de Red", styles["Heading2"]))
 
     # Introducción
     story.append(Paragraph(
@@ -533,7 +615,7 @@ def generar_informe_pdf(company_name, db, date_str=None):
     # Comprobar dominios que expiran en menos de un año
     dominios_criticos = dominios_por_expirar(domains)
     if dominios_criticos:
-        story.append(Paragraph("Dominios que expiran en menos de un año", styles["Heading2"]))
+        story.append(Paragraph("Dominios que expiran en menos de medio año", styles["Heading2"]))
         data = [["Dominio", "Fecha de Expiración"]]
         for item in dominios_criticos:
             data.append([item["dominio"], item["expiration_date"].strftime("%d/%m/%Y")])
