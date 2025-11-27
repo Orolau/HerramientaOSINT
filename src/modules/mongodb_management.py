@@ -13,8 +13,11 @@ def connect_database():
     return db
 
 
-def save_in_database(db, data, company_name):
-    date_str = datetime.now().strftime("%Y%m%d")
+def save_in_database(db, data, company_name, date=None):
+    if not date:
+        date_str = datetime.now().strftime("%Y%m%d")
+    else:
+        date_str = date
     db[date_str].update_one({"company": company_name}, {"$set": data}, upsert = True)
 
 def add_to_database_field(db, company_name, field_name, new_data):

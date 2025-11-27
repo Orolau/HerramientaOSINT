@@ -267,7 +267,7 @@ def get_crtsh_and_classify(company_name, db):
             # Validar dominios antes de guardar
             valid_domains = check_domains_parallel(domains)
             domain_docs = [{"name": d, "source": "crt.sh", "included_subdomains_search": True} for d in valid_domains]
-            subdomain_docs = [{"name": s, "source": "crt.sh"} for s in subdomains]
+            subdomain_docs = [{"name": s, "source": "crt.sh", "category": subdomain_categorizer(s)} for s in subdomains]
 
             if domain_docs:
                 add_to_database_field(db, company_name, "domains", domain_docs)
