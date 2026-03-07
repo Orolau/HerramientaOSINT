@@ -7,9 +7,11 @@ from modules.reports_module import generar_informe_pdf
 from modules.locations_module import get_company_locations_serpapi
 from modules.employees_module import get_company_employees_serpapi
 from modules.shodan_module import shodan_get_assets
+from modules.leaks_module import search_all_domains_leaks
 
 def main():
     db = connect_database()
+    
     company = input("Introduce el nombre de la empresa: ")
     get_related_company_names(company, db)
     get_crtsh_and_classify(company, db)
@@ -17,6 +19,7 @@ def main():
     mark_excluded_domains_for_subdomain_search(company, db)
     get_subdomains(company, db)
     get_whois_all_domains(company, db)
+    search_all_domains_leaks(company, db)
     get_asn_info(company, db)
     shodan_get_assets(company, db)
     get_company_locations_serpapi(company, db)

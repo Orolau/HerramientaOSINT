@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import os
 import folium
 from reportlab.platypus import Image
+from collections import defaultdict
 
 def dominios_por_expirar(domains):
     """
@@ -179,7 +180,102 @@ def generar_informe_pdf(company_name, db, date_str=None):
                 story.append(Paragraph(f"<b>{category_title}</b>: {names_str}", styles["Normal"]))
                 story.append(Spacer(1, 5))
 
+    # ======= Filtraciones de Seguridad (Data Breaches) =======
+    story.append(Paragraph("Filtraciones de Seguridad Detectadas", styles["Heading2"]))
 
+    story.append(Paragraph(
+        "En esta sección se muestran las filtraciones de datos públicas asociadas "
+        "a los dominios identificados de la organización. La información ha sido "
+        "recopilada a partir de bases de datos especializadas en brechas de seguridad. "
+        "Se detalla la fecha de la filtración, el volumen de cuentas afectadas y el "
+        "tipo de datos comprometidos.",
+        styles["Normal"]
+    ))
+    story.append(Spacer(1, 10))
+
+    domain_leaks = record.get("domain_leaks", {})
+
+    if not domain_leaks:
+        story.append(Paragraph(
+            "No se han identificado filtraciones públicas asociadas a los dominios analizados.",
+            styles["Italic"]
+        ))
+        story.append(Spacer(1, 15))
+    else:
+
+        grouped_leaks = defaultdict(list)
+
+        for leak in domain_leaks:
+            domain = leak.get("domain", "Desconocido")
+            grouped_leaks[domain].append(leak)
+
+
+        # Ahora iteramos por dominio
+        for domain, leaks in grouped_leaks.items():
+
+            story.append(Paragraph(f"<b>Dominio:</b> {domain}", styles["Heading3"]))
+            story.append(Spacer(1, 6))
+
+            if not leaks:
+                story.append(Paragraph(
+                    "No se han encontrado filtraciones asociadas a este dominio.",
+                    styles["Normal"]
+                ))
+                story.append(Spacer(1, 10))
+                continue
+
+            # Cabecera tabla
+            data = [[
+                "Nombre",
+                "Fecha",
+                "Cuentas afectadas",
+                "Datos comprometidos",
+                "Verificada"
+            ]]
+
+            for leak in leaks:
+
+                data_classes_raw = leak.get("data_classes", [])
+                data_classes = ", ".join(map(str, data_classes_raw)) if isinstance(data_classes_raw, list) else "-"
+
+                data.append([
+                    Paragraph(leak.get("name", "-"), styles["Normal"]),
+                    Paragraph(leak.get("breach_date", "-"), styles["Normal"]),
+                    Paragraph(str(leak.get("pwn_count", "-")), styles["Normal"]),
+                    Paragraph(data_classes, styles["Normal"]),
+                    Paragraph("Sí" if leak.get("is_verified") else "No", styles["Normal"])
+                ])
+
+            table = Table(data, hAlign='LEFT', colWidths=[90, 70, 80, 160, 60])
+
+            ts = TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#333333")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ])
+
+            # ===== Resaltar criticidad =====
+            for row_idx, leak in enumerate(leaks, start=1):
+
+                data_classes = leak.get("data_classes", [])
+
+                if isinstance(data_classes, list):
+
+                    # Si contiene passwords → crítico
+                    if "Passwords" in data_classes:
+                        ts.add('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor("#ffcccc"))
+                        ts.add('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold')
+
+                    # Si solo contiene emails
+                    elif "Email addresses" in data_classes:
+                        ts.add('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor("#ffe5cc"))
+
+            table.setStyle(ts)
+
+            story.append(table)
+            story.append(Spacer(1, 15))
     # ======= Dominios =======
     story.append(Paragraph("Dominios Identificados", styles["Heading2"]))
     story.append(Spacer(1, 6))
