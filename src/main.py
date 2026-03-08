@@ -8,6 +8,7 @@ from modules.locations_module import get_company_locations_serpapi
 from modules.employees_module import get_company_employees_serpapi
 from modules.shodan_module import shodan_get_assets
 from modules.leaks_module import search_all_domains_leaks
+from modules.graph_module import create_graph
 
 def main():
     db = connect_database()
@@ -25,6 +26,7 @@ def main():
     get_company_locations_serpapi(company, db)
     get_company_employees_serpapi(company, db)
     generar_informe_pdf(company, db)
+    create_graph(company, db)
     
 
 if __name__ == "__main__":
